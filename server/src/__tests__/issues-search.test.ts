@@ -1,7 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, test } from "vitest";
 import { sql, eq } from "drizzle-orm";
 import { createDb } from "@paperclipai/db";
-import { companies, agents, issues } from "@paperclipai/db";
+import { companies, agents, goals, issues } from "@paperclipai/db";
 import { issueService } from "../services/issues.js";
 
 describe("Issue Search", () => {
@@ -9,6 +9,7 @@ describe("Issue Search", () => {
   let svc: ReturnType<typeof issueService>;
   let companyId: string;
   let agentId: string;
+  let goalId: string;
 
   beforeAll(() => {
     const url = process.env.DATABASE_URL || process.env.PAPERCLIP_DATABASE_URL;
@@ -44,6 +45,16 @@ describe("Issue Search", () => {
       .returning();
     agentId = agent.id;
 
+    const [goal] = await db
+      .insert(goals)
+      .values({
+        companyId,
+        title: "Search Goal",
+        status: "active",
+      })
+      .returning();
+    goalId = goal.id;
+
     // Create test issues
     await db.insert(issues).values([
       {
@@ -74,6 +85,17 @@ describe("Issue Search", () => {
         description: "Update the pricing information",
         status: "todo",
         priority: "medium",
+        goalId,
+        createdByAgentId: agentId,
+      },
+      {
+        companyId,
+        identifier: "ZERA-101",
+        issueNumber: 101,
+        title: "Critical onboarding fix",
+        description: "Critical priority issue",
+        status: "in_progress",
+        priority: "critical",
         createdByAgentId: agentId,
       },
     ]);
@@ -137,5 +159,22 @@ describe("Issue Search", () => {
     if (titleStartIndex !== -1 && titleContainsIndex !== -1) {
       expect(titleStartIndex).toBeLessThan(titleContainsIndex);
     }
+  });
+
+  test("filters issues by goalId", async () => {
+    const results = await svc.list(companyId, { goalId });
+    expect(results).toHaveLength(1);
+    expect(results[0]?.identifier).toBe("ZERA-100");
+  });
+
+  test("filters issues by priority", async () => {
+    const results = await svc.list(companyId, { priority: "high" });
+    expect(results).toHaveLength(1);
+    expect(results[0]?.identifier).toBe("ZERA-41");
+  });
+
+  test("applies limit to issue list", async () => {
+    const results = await svc.list(companyId, { status: "todo,in_progress,done", limit: 2 });
+    expect(results).toHaveLength(2);
   });
 });
