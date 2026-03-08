@@ -946,6 +946,85 @@ export function heartbeatService(db: Db) {
     return { reaped: reaped.length, runIds: reaped };
   }
 
+  async function releaseStaleExecutionLocks(opts?: { lockTtlMs?: number }) {
+    const lockTtlMs = opts?.lockTtlMs ?? 15 * 60 * 1000; // 15 minutes default
+    const now = new Date();
+    const cutoffTime = new Date(now.getTime() - lockTtlMs);
+
+    // Find all issues with stale execution locks
+    const staleLockedIssues = await db
+      .select({
+        id: issues.id,
+        identifier: issues.identifier,
+        executionRunId: issues.executionRunId,
+        executionLockedAt: issues.executionLockedAt,
+        executionAgentNameKey: issues.executionAgentNameKey,
+      })
+      .from(issues)
+      .where(
+        and(
+          sql`${issues.executionLockedAt} IS NOT NULL`,
+          sql`${issues.executionLockedAt} < ${cutoffTime}`,
+        ),
+      );
+
+    const released: Array<{ issueId: string; issueIdentifier: string | null; runId: string | null }> = [];
+
+    for (const issue of staleLockedIssues) {
+      // Check if the run still exists and is active
+      let runExists = false;
+      if (issue.executionRunId) {
+        const run = await db
+          .select({ id: heartbeatRuns.id, status: heartbeatRuns.status })
+          .from(heartbeatRuns)
+          .where(eq(heartbeatRuns.id, issue.executionRunId))
+          .then((rows) => rows[0] ?? null);
+
+        runExists = run !== null && (run.status === "queued" || run.status === "running");
+      }
+
+      // If run doesn't exist or is not active, release the lock
+      if (!runExists) {
+        await db
+          .update(issues)
+          .set({
+            executionRunId: null,
+            executionAgentNameKey: null,
+            executionLockedAt: null,
+            updatedAt: now,
+          })
+          .where(eq(issues.id, issue.id));
+
+        released.push({
+          issueId: issue.id,
+          issueIdentifier: issue.identifier,
+          runId: issue.executionRunId,
+        });
+
+        logger.warn(
+          {
+            issueId: issue.id,
+            issueIdentifier: issue.identifier,
+            executionRunId: issue.executionRunId,
+            executionAgentNameKey: issue.executionAgentNameKey,
+            lockedAt: issue.executionLockedAt,
+            ageMinutes: Math.round((now.getTime() - new Date(issue.executionLockedAt!).getTime()) / 60000),
+          },
+          "Auto-released stale execution lock",
+        );
+      }
+    }
+
+    if (released.length > 0) {
+      logger.warn(
+        { releasedCount: released.length, issues: released },
+        `Released ${released.length} stale execution lock(s)`,
+      );
+    }
+
+    return { released: released.length, issues: released };
+  }
+
   async function updateRuntimeState(
     agent: typeof agents.$inferSelect,
     run: typeof heartbeatRuns.$inferSelect,
@@ -2204,6 +2283,8 @@ export function heartbeatService(db: Db) {
     wakeup: enqueueWakeup,
 
     reapOrphanedRuns,
+
+    releaseStaleExecutionLocks,
 
     tickTimers: async (now = new Date()) => {
       const allAgents = await db.select().from(agents);

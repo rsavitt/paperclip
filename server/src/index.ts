@@ -510,6 +510,13 @@ if (config.heartbeatSchedulerEnabled) {
       .catch((err) => {
         logger.error({ err }, "periodic reap of orphaned heartbeat runs failed");
       });
+
+    // Periodically release stale execution locks (15-min TTL)
+    void heartbeat
+      .releaseStaleExecutionLocks({ lockTtlMs: 15 * 60 * 1000 })
+      .catch((err) => {
+        logger.error({ err }, "periodic release of stale execution locks failed");
+      });
   }, config.heartbeatSchedulerIntervalMs);
 }
 
