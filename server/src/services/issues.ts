@@ -1387,6 +1387,41 @@ export function issueService(db: Db) {
       }));
     },
 
+    getChildren: async (issueId: string) => {
+      const children = await db.select({
+        id: issues.id,
+        identifier: issues.identifier,
+        title: issues.title,
+        status: issues.status,
+        priority: issues.priority,
+        assigneeAgentId: issues.assigneeAgentId,
+        assigneeUserId: issues.assigneeUserId,
+        projectId: issues.projectId,
+        goalId: issues.goalId,
+        createdAt: issues.createdAt,
+        startedAt: issues.startedAt,
+        completedAt: issues.completedAt,
+      })
+        .from(issues)
+        .where(eq(issues.parentId, issueId))
+        .orderBy(desc(issues.priority), desc(issues.createdAt));
+
+      return children.map(c => ({
+        id: c.id,
+        identifier: c.identifier ?? null,
+        title: c.title,
+        status: c.status,
+        priority: c.priority,
+        assigneeAgentId: c.assigneeAgentId ?? null,
+        assigneeUserId: c.assigneeUserId ?? null,
+        projectId: c.projectId ?? null,
+        goalId: c.goalId ?? null,
+        createdAt: c.createdAt,
+        startedAt: c.startedAt ?? null,
+        completedAt: c.completedAt ?? null,
+      }));
+    },
+
     staleCount: async (companyId: string, minutes = 60) => {
       const cutoff = new Date(Date.now() - minutes * 60 * 1000);
       const result = await db

@@ -298,8 +298,9 @@ export function issueRoutes(db: Db, storage: StorageService) {
       return;
     }
     assertCompanyAccess(req, issue.companyId);
-    const [ancestors, project, goal, mentionedProjectIds] = await Promise.all([
+    const [ancestors, children, project, goal, mentionedProjectIds] = await Promise.all([
       svc.getAncestors(issue.id),
+      svc.getChildren(issue.id),
       issue.projectId ? projectsSvc.getById(issue.projectId) : null,
       issue.goalId ? goalsSvc.getById(issue.goalId) : null,
       svc.findMentionedProjectIds(issue.id),
@@ -307,7 +308,7 @@ export function issueRoutes(db: Db, storage: StorageService) {
     const mentionedProjects = mentionedProjectIds.length > 0
       ? await projectsSvc.listByIds(issue.companyId, mentionedProjectIds)
       : [];
-    res.json({ ...issue, ancestors, project: project ?? null, goal: goal ?? null, mentionedProjects });
+    res.json({ ...issue, ancestors, children, project: project ?? null, goal: goal ?? null, mentionedProjects });
   });
 
   router.post("/issues/:id/read", async (req, res) => {
