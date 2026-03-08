@@ -132,26 +132,37 @@ export function issueRoutes(db: Db, storage: StorageService) {
     }
     const runId = requireAgentRunId(req, res);
     if (!runId) return false;
-    const ownership = await svc.assertCheckoutOwner(issue.id, actorAgentId, runId);
-    if (ownership.adoptedFromRunId) {
-      const actor = getActorInfo(req);
-      await logActivity(db, {
-        companyId: issue.companyId,
-        actorType: actor.actorType,
-        actorId: actor.actorId,
-        agentId: actor.agentId,
-        runId: actor.runId,
-        action: "issue.checkout_lock_adopted",
-        entityType: "issue",
-        entityId: issue.id,
-        details: {
-          previousCheckoutRunId: ownership.adoptedFromRunId,
-          checkoutRunId: runId,
-          reason: "stale_checkout_run",
-        },
-      });
+
+    try {
+      const ownership = await svc.assertCheckoutOwner(issue.id, actorAgentId, runId);
+      if (ownership.adoptedFromRunId) {
+        const actor = getActorInfo(req);
+        await logActivity(db, {
+          companyId: issue.companyId,
+          actorType: actor.actorType,
+          actorId: actor.actorId,
+          agentId: actor.agentId,
+          runId: actor.runId,
+          action: "issue.checkout_lock_adopted",
+          entityType: "issue",
+          entityId: issue.id,
+          details: {
+            previousCheckoutRunId: ownership.adoptedFromRunId,
+            checkoutRunId: runId,
+            reason: "stale_checkout_run",
+          },
+        });
+      }
+      return true;
+    } catch (err) {
+      if (err instanceof HttpError) {
+        const response: { error: string; details?: unknown } = { error: err.message };
+        if (err.details) response.details = err.details;
+        res.status(err.status).json(response);
+        return false;
+      }
+      throw err;
     }
-    return true;
   }
 
   async function normalizeIssueIdentifier(rawId: string): Promise<string> {
